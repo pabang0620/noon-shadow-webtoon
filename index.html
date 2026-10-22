@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>정오의 그림자</title>
+<style>
+  :root { --bg: #ffffff; --ink: #141414; --muted: #8a8a8a; --line: #e6e6e6; --accent: #1f5fd6; --dot: #e5484d; --done: #2e9e5b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; -webkit-text-size-adjust: 100%; }
+  header { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .row { display: flex; gap: 6px; overflow-x: auto; padding: 8px 12px; scrollbar-width: none; }
+  .row::-webkit-scrollbar { display: none; }
+  .chip { flex: 0 0 auto; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 16px; padding: 6px 12px; font-size: 14px; }
+  .chip.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .tab { flex: 0 0 auto; min-width: 40px; border: 0; background: none; padding: 6px 10px; font-size: 15px; color: var(--muted); border-bottom: 2px solid transparent; }
+  .tab.on { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+  .title { padding: 0 12px 6px; font-size: 13px; color: var(--muted); }
+  main { max-width: 800px; margin: 0 auto; }
+  .img { position: relative; line-height: 0; }
+  .img img { width: 100%; height: auto; display: block; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .pin { position: absolute; right: 6px; width: 22px; height: 22px; margin-top: -11px; border-radius: 50%; background: var(--dot); color: #fff; font-size: 12px; line-height: 22px; text-align: center; border: 2px solid #fff; }
+  .pin.done { background: var(--done); }
+  nav.bottom { display: flex; justify-content: space-between; gap: 8px; padding: 16px 12px 40px; }
+  nav.bottom button, .btn { border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 8px; padding: 10px 14px; font-size: 15px; }
+  .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .hint { text-align: center; color: var(--muted); font-size: 12px; padding: 10px 12px 0; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--bg); border-top: 1px solid var(--line); padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); display: none; }
+  .sheet.show { display: block; }
+  .sheet textarea { width: 100%; height: 96px; font-size: 16px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; resize: none; }
+  .sheet .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+  .sheet .where { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .note { font-size: 14px; white-space: pre-wrap; margin-bottom: 8px; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 16px; font-size: 13px; display: none; z-index: 30; }
+</style>
+</head>
+<body>
+<header>
+  <div class="row" id="chapters"></div>
+  <div class="row" id="parts"></div>
+  <div class="title" id="title"></div>
+</header>
+<p class="hint">고칠 곳을 길게 누르면 피드백을 남길 수 있어요. 빨간 점을 누르면 남긴 내용이 보여요</p>
+<main id="view"></main>
+<nav class="bottom"><button id="prev">이전 편</button><button id="next">다음 편</button></nav>
+
+<div class="sheet" id="addSheet">
+  <div class="where" id="addWhere"></div>
+  <textarea id="addText" placeholder="무엇이 이상한지 적어 주세요"></textarea>
+  <div class="acts"><button class="btn" id="addCancel">취소</button><button class="btn primary" id="addSave">저장</button></div>
+</div>
+<div class="sheet" id="showSheet">
+  <div class="where" id="showWhere"></div>
+  <div class="note" id="showText"></div>
+  <div class="acts"><button class="btn" id="showDelete">삭제</button><button class="btn primary" id="showClose">닫기</button></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'https://qcjskzblzvmepdazoobt.supabase.co/rest/v1/rpc/';
+const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFjanNremJsenZtZXBkYXpvb2J0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgyNjAxOTgsImV4cCI6MjA3MzgzNjE5OH0.vIGymiemOp120InDukrUcJrb5iga3ceQx_ylKccmM9A';
+const $ = (id) => document.getElementById(id);
+let manifest = [], cur = { c: 0, p: 0 }, pending = null, shown = null;
+
+function rpc(fn, body) {
+  return fetch(API + fn, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Profile': 'noon_webtoon', 'Accept-Profile': 'noon_webtoon', apikey: ANON, Authorization: 'Bearer ' + ANON }, body: JSON.stringify(body) })
+    .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+}
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => { t.style.display = 'none'; }, 1800); }
+function save() { try { localStorage.setItem('noon_pos', JSON.stringify(cur)); } catch (e) {} }
+function load() { try { const v = JSON.parse(localStorage.getItem('noon_pos') || 'null'); if (v && manifest[v.c] && manifest[v.c].parts[v.p]) cur = v; } catch (e) {} }
+
+function renderNav() {
+  $('chapters').innerHTML = '';
+  manifest.forEach((ch, i) => {
+    const b = document.createElement('button'); b.className = 'chip' + (i === cur.c ? ' on' : ''); b.textContent = ch.no + '화';
+    b.onclick = () => { cur = { c: i, p: 0 }; show(); }; $('chapters').appendChild(b);
+  });
+  const ch = manifest[cur.c];
+  $('parts').innerHTML = '';
+  ch.parts.forEach((pt, j) => {
+    const b = document.createElement('button'); b.className = 'tab' + (j === cur.p ? ' on' : ''); b.textContent = String(j + 1);
+    b.onclick = () => { cur.p = j; show(); }; $('parts').appendChild(b);
+  });
+  $('title').textContent = ch.no + '화 ' + ch.title + ' · ' + (cur.p + 1) + '편';
+  $('chapters').children[cur.c].scrollIntoView({ inline: 'center', block: 'nearest' });
+}
+
+function show() {
+  save(); renderNav();
+  const ch = manifest[cur.c], pt = ch.parts[cur.p];
+  const view = $('view'); view.innerHTML = '';
+  pt.images.forEach((im, idx) => {
+    const box = document.createElement('div'); box.className = 'img'; box.dataset.img = idx + 1;
+    const img = document.createElement('img'); img.src = im.f; img.loading = idx < 2 ? 'eager' : 'lazy'; img.width = im.w; img.height = im.h; img.alt = '';
+    box.appendChild(img); attachPress(box); view.appendChild(box);
+  });
+  window.scrollTo(0, 0);
+  loadPins();
+}
+
+function attachPress(box) {
+  let timer = null, sx = 0, sy = 0;
+  const start = (x, y) => {
+    sx = x; sy = y; clearTimeout(timer);
+    timer = setTimeout(() => {
+      const r = box.getBoundingClientRect(); const yr = Math.min(1, Math.max(0, (sy - r.top) / r.height));
+      const ch = manifest[cur.c];
+      pending = { p_ep: ch.key, p_part: ch.parts[cur.p].k, p_img: Number(box.dataset.img), p_y: Math.round(yr * 10000) / 10000 };
+      $('addWhere').textContent = ch.no + '화 ' + (cur.p + 1) + '편 · ' + box.dataset.img + '번째 조각 ' + Math.round(yr * 100) + '% 위치';
+      $('addText').value = ''; $('addSheet').classList.add('show'); setTimeout(() => $('addText').focus(), 50);
+      if (navigator.vibrate) navigator.vibrate(30);
+    }, 550);
+  };
+  const cancel = () => clearTimeout(timer);
+  box.addEventListener('touchstart', (e) => { const t = e.touches[0]; start(t.clientX, t.clientY); }, { passive: true });
+  box.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) cancel(); }, { passive: true });
+  box.addEventListener('touchend', cancel); box.addEventListener('touchcancel', cancel);
+  box.addEventListener('mousedown', (e) => start(e.clientX, e.clientY)); box.addEventListener('mouseup', cancel); box.addEventListener('mouseleave', cancel);
+  box.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+function loadPins() {
+  const ch = manifest[cur.c];
+  rpc('list_feedback', { p_ep: ch.key, p_part: ch.parts[cur.p].k }).then((rows) => {
+    document.querySelectorAll('.pin').forEach((p) => p.remove());
+    rows.forEach((row, n) => {
+      const box = document.querySelector('.img[data-img="' + row.img + '"]'); if (!box) return;
+      const pin = document.createElement('div'); pin.className = 'pin' + (row.status !== 'open' ? ' done' : ''); pin.style.top = (row.y * 100) + '%'; pin.textContent = String(n + 1);
+      pin.onclick = (e) => { e.stopPropagation(); shown = row; $('showWhere').textContent = (row.status === 'open' ? '반영 전' : '반영됨') + ' · ' + new Date(row.created_at).toLocaleString('ko-KR'); $('showText').textContent = row.note; $('showDelete').style.display = row.status === 'open' ? '' : 'none'; $('showSheet').classList.add('show'); };
+      box.appendChild(pin);
+    });
+  }).catch(() => {});
+}
+
+$('addCancel').onclick = () => { $('addSheet').classList.remove('show'); pending = null; };
+$('addSave').onclick = () => {
+  const note = $('addText').value.trim(); if (!note || !pending) return;
+  rpc('add_feedback', Object.assign({}, pending, { p_note: note })).then(() => { $('addSheet').classList.remove('show'); pending = null; toast('저장했어요'); loadPins(); }).catch(() => toast('저장 실패. 다시 눌러 주세요'));
+};
+$('showClose').onclick = () => { $('showSheet').classList.remove('show'); shown = null; };
+$('showDelete').onclick = () => { if (!shown) return; rpc('delete_feedback', { p_id: shown.id }).then(() => { $('showSheet').classList.remove('show'); toast('삭제했어요'); loadPins(); }).catch(() => toast('삭제 실패')); };
+$('prev').onclick = () => { if (cur.p > 0) cur.p--; else if (cur.c > 0) { cur.c--; cur.p = manifest[cur.c].parts.length - 1; } else return; show(); };
+$('next').onclick = () => { if (cur.p < manifest[cur.c].parts.length - 1) cur.p++; else if (cur.c < manifest.length - 1) { cur.c++; cur.p = 0; } else return; show(); };
+
+fetch('manifest.json', { cache: 'no-cache' }).then((r) => r.json()).then((m) => { manifest = m; load(); show(); });
+</script>
+</body>
+</html>
